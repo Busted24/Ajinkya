@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, Edit2, Trash2, X, Upload, LogOut, User, Download, Share2, AlertCircle, CheckCircle, XCircle, HelpCircle, Printer, Moon, Sun, ArrowUpDown, RotateCcw, Menu, Wifi, WifiOff } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import html2canvas from 'html2canvas';
 
 // Supabase Config
 const SUPABASE_URL = 'https://ektfrusvejghlbdxhdnf.supabase.co';
@@ -785,7 +786,6 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
     setIsCapturing(true);
     
     try {
-      const html2canvas = await import('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/+esm').then(m => m.default);
       
       // Store original styles
       const originalWidth = ref.current.style.width;
