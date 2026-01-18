@@ -327,12 +327,89 @@ const PeopleDirectoryApp = () => {
     } catch (e) { return text; }
   };
 
-  const handleExcelImport = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    showAlert('Excel import feature requires XLSX library in production', 'info');
+  const handleExcelImport = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  setSyncing(true);
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (!rows.length) {
+      showAlert('Excel file is empty', 'warning');
+      return;
+    }
+
+    const people = [];
+
+    for (const row of rows) {
+      // ✅ SUPPORT ENGLISH + MARATHI HEADERS
+      const nameRaw =
+        row.name || row.Name || row['नाव'] || '';
+
+      if (!nameRaw) continue;
+
+      const phoneRaw =
+        row.phone || row.Phone || row['मोबाईल'] || row['फोन'] || '';
+
+      const addressRaw =
+        row.address || row.Address || row['पत्ता'] || '';
+
+      const occupationRaw =
+        row.occupation || row.Occupation || row['व्यवसाय'] || '';
+
+      const companyRaw =
+        row.company || row.Company || row['कंपनी'] || '';
+
+      const notesRaw =
+        row.notes || row.Notes || row['नोंद'] || '';
+
+      const person = {
+        id: Date.now().toString() + Math.random(),
+        access_code: accessCode,
+
+        // ✅ TRANSLATION APPLIED
+        name: await translateMarathi(nameRaw),
+        phone: convertMarathiDigits(phoneRaw),
+        address: await translateMarathi(addressRaw),
+        occupation: await translateMarathi(occupationRaw),
+        company: await translateMarathi(companyRaw),
+        notes: await translateMarathi(notesRaw),
+
+        email: row.email || '',
+        dob: row.dob || '',
+        photo: '',
+        serial_number: convertMarathiDigits(row.serialNumber || ''),
+        voter_list_number: convertMarathiDigits(row.voterListNumber || ''),
+        created_at: new Date().toISOString()
+      };
+
+      people.push(person);
+    }
+
+    if (!people.length) {
+      showAlert('No valid contacts found', 'warning');
+      return;
+    }
+
+    await supabase.bulkInsert(people);
+    await loadData();
+    await loadCount();
+
+    showAlert(`Imported ${people.length} contacts with Marathi translation`, 'success');
+  } catch (err) {
+    console.error(err);
+    showAlert('Excel import failed', 'error');
+  } finally {
+    setSyncing(false);
     e.target.value = '';
-  };
+  }
+};
+
 
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) { showAlert('Select contacts', 'warning'); return; }
