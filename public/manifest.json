@@ -1,7 +1,7 @@
 {
   "name": "Ajinkya",
   "short_name": "Ajinkya",
-  "start_url": "/",
+  "start_url": "https://ajinkyadirectory.netlify.app/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
