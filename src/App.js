@@ -13,7 +13,6 @@ class SupabaseClient {
     this.key = key;
   }
 
-  // NEW: Pagination support
   async getPeople(code, limit = 100, offset = 0) {
     const res = await fetch(`${this.url}/rest/v1/people?access_code=eq.${code}&select=*&limit=${limit}&offset=${offset}&order=created_at.desc`, {
       headers: { 'apikey': this.key, 'Authorization': `Bearer ${this.key}` }
@@ -22,7 +21,6 @@ class SupabaseClient {
     return res.json();
   }
 
-  // NEW: Server-side search
   async searchPeople(code, query, field = 'name', limit = 100) {
     let url = `${this.url}/rest/v1/people?access_code=eq.${code}&select=*&limit=${limit}`;
     if (query && query.trim()) {
@@ -39,7 +37,6 @@ class SupabaseClient {
     return res.json();
   }
 
-  // NEW: Get total count
   async getCount(code) {
     const res = await fetch(`${this.url}/rest/v1/people?access_code=eq.${code}&select=count`, {
       headers: { 'apikey': this.key, 'Authorization': `Bearer ${this.key}`, 'Prefer': 'count=exact' }
@@ -144,6 +141,7 @@ const HelpModal = ({ onClose }) => (
         <div><h3 className="font-bold text-purple-600 mb-2">🚀 Getting Started</h3><p className="text-sm">Enter access code → Share with team → Real-time sync!</p></div>
         <div><h3 className="font-bold text-purple-600 mb-2">☁️ Cloud Sync</h3><p className="text-sm">All data stored in cloud • Auto-sync • Handles 70k+ contacts</p></div>
         <div><h3 className="font-bold text-purple-600 mb-2">📄 Pagination</h3><p className="text-sm">View 100 contacts per page • Use Previous/Next buttons • Search across all data</p></div>
+        <div><h3 className="font-bold text-purple-600 mb-2">📥 Excel Import</h3><p className="text-sm">Import Excel files • Auto-converts Marathi digits • Progress tracking</p></div>
       </div>
     </div>
   </div>
@@ -162,8 +160,8 @@ const WelcomeModal = ({ onClose }) => (
           <li>✅ 70,000+ contacts support</li>
           <li>✅ Server-side search & pagination</li>
           <li>✅ Real-time cloud sync</li>
-          <li>✅ Excel import with translation</li>
-          <li>✅ Share via WhatsApp</li>
+          <li>✅ Excel import (no translation needed)</li>
+          <li>✅ Share via WhatsApp (text + image)</li>
         </ul>
         <button onClick={onClose} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-bold">🚀 Start</button>
       </div>
@@ -198,8 +196,8 @@ const PeopleDirectoryApp = () => {
   const [sortOrder, setSortOrder] = useState('asc');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [importProgress, setImportProgress] = useState(null);
 
-  // Set document title
   useEffect(() => {
     document.title = `Ajinkya Directory v3.0 ${totalCount ? `• ${totalCount.toLocaleString()} contacts` : ''}`;
   }, [totalCount]);
@@ -297,7 +295,8 @@ const PeopleDirectoryApp = () => {
       const formatted = data.map(p => ({
         id: p.id, name: p.name, phone: p.phone || '', email: p.email || '', address: p.address || '',
         dob: p.dob || '', occupation: p.occupation || '', company: p.company || '', notes: p.notes || '',
-        photo: p.photo || '', serialNumber: p.serial_number || '', voterListNumber: p.voter_list_number || '', createdAt: p.created_at
+        photo: p.photo || '', serialNumber: p.serial_number || '', voterListNumber: p.voter_list_number || '', 
+        referenceId: p.reference_id || '', createdAt: p.created_at
       }));
       setPeople(formatted);
       setFilteredPeople(formatted);
@@ -316,100 +315,173 @@ const PeopleDirectoryApp = () => {
     return s;
   };
 
+  const normalizeText = (value) => {
+    if (value === null || value === undefined) return null;
+    let text = String(value).trim();
+    const marathiDigits = '०१२३४५६७८९';
+    const englishDigits = '0123456789';
+    text = text.replace(/[०-९]/g, d => englishDigits[marathiDigits.indexOf(d)]);
+    text = text.replace(/\u00A0/g, ' ');
+    return text || null;
+  };
+
   const translateMarathi = async (text) => {
     if (!text || typeof text !== 'string' || !text.trim()) return text;
-    if (/^[\d\s\+\-\(\)०-९]+$/.test(text) || /^[\w\.\-]+@[\w\.\-]+$/.test(text)) return convertMarathiDigits(text);
+    
+    // Skip if already English (only contains English letters, numbers, spaces)
+    if (/^[a-zA-Z0-9\s\.\-]+$/.test(text)) return text;
+    
+    // Skip pure numbers/emails
+    if (/^[\d\s\+\-\(\)०-९]+$/.test(text) || /^[\w\.\-]+@[\w\.\-]+$/.test(text)) {
+      return convertMarathiDigits(text);
+    }
+    
     try {
+      // Add delay to avoid rate limiting
+      await new Promise(r => setTimeout(r, 1000));
+      
       const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=mr|en`);
       const data = await res.json();
-      if (data.responseStatus === 200 && data.responseData?.translatedText) return data.responseData.translatedText.trim().replace(/^["']|["']$/g, '');
-      return text;
-    } catch (e) { return text; }
+      
+      if (data.responseStatus === 200 && data.responseData?.translatedText) {
+        const translated = data.responseData.translatedText.trim().replace(/^["']|["']$/g, '');
+        // If translation looks suspicious (same as input or too similar), return original with digit conversion
+        if (translated.toLowerCase() === text.toLowerCase()) {
+          return convertMarathiDigits(text);
+        }
+        return translated;
+      }
+      
+      // If translation fails, at least convert digits
+      return convertMarathiDigits(text);
+    } catch (e) {
+      console.error('Translation error:', e);
+      return convertMarathiDigits(text);
+    }
   };
 
   const handleExcelImport = async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  setSyncing(true);
+    const confirmed = await showConfirm('Import with Marathi translation? (Note: Free API limits ~100 translations, then imports as-is)');
+    const shouldTranslate = confirmed;
 
-  try {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    setSyncing(true);
+    setImportProgress({ total: 0, done: 0 });
 
-    if (!rows.length) {
-      showAlert('Excel file is empty', 'warning');
-      return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      if (rows.length < 2) {
+        showAlert('No data found in Excel', 'error');
+        setImportProgress(null);
+        setSyncing(false);
+        return;
+      }
+
+      const dataRows = rows.slice(2); // skip title + header
+      setImportProgress({ total: dataRows.length, done: 0, sheet: sheetName });
+
+      // Batch insert for better performance
+      const batchSize = 50;
+      const allPayloads = [];
+      let translationFailed = false;
+      let translatedCount = 0;
+
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+        if (!row || !row[0]) continue;
+
+        let name = normalizeText(row[0]);
+        let address = normalizeText(row[2]);
+        let station = normalizeText(row[5]);
+
+        // Translate if requested and translation hasn't failed
+        if (shouldTranslate && !translationFailed) {
+          try {
+            if (name && !/^[a-zA-Z0-9\s\.\-]+$/.test(name)) {
+              const translated = await translateMarathi(name);
+              // Check if translation actually worked
+              if (translated && translated !== name) {
+                name = translated;
+                translatedCount++;
+              } else if (i > 100) {
+                // After 100 records, if getting same text back, API limit hit
+                translationFailed = true;
+                showAlert(`⚠️ Translation limit reached (${translatedCount} translated). Importing rest as-is...`, 'warning');
+              }
+            }
+            
+            if (address && !/^[a-zA-Z0-9\s\.\-]+$/.test(address) && !translationFailed) {
+              const translated = await translateMarathi(address);
+              if (translated && translated !== address) {
+                address = translated;
+              }
+            }
+            
+            if (station && !/^[a-zA-Z0-9\s\.\-]+$/.test(station) && !translationFailed) {
+              const translated = await translateMarathi(station);
+              if (translated && translated !== station) {
+                station = translated;
+              }
+            }
+          } catch (err) {
+            console.error('Translation error:', err);
+            translationFailed = true;
+            showAlert(`⚠️ Translation stopped at record ${i+1}. Continuing import...`, 'warning');
+          }
+        }
+
+        const payload = {
+          id: `${Date.now()}-${i}-${Math.random()}`,
+          access_code: accessCode,
+          name: name,
+          phone: normalizeText(row[1]),
+          email: null,
+          address: address,
+          dob: null,
+          occupation: station,
+          company: normalizeText(row[6]),
+          notes: null,
+          photo: null,
+          serial_number: normalizeText(row[3]),
+          voter_list_number: normalizeText(row[4]),
+          reference_id: normalizeText(row[7]),
+          created_at: new Date().toISOString()
+        };
+
+        allPayloads.push(payload);
+        setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
+
+        // Insert in batches
+        if (allPayloads.length >= batchSize || i === dataRows.length - 1) {
+          await supabase.bulkInsert(allPayloads);
+          allPayloads.length = 0; // Clear batch
+        }
+      }
+
+      setImportProgress(null);
+      await loadData();
+      await loadCount();
+      
+      const successMsg = shouldTranslate 
+        ? `✅ Imported ${dataRows.length} contacts! (${translatedCount} translated, rest kept as-is)`
+        : `✅ Imported ${dataRows.length} contacts!`;
+      showAlert(successMsg, 'success');
+    } catch (err) {
+      console.error(err);
+      showAlert('Import failed: ' + err.message, 'error');
+    } finally {
+      setSyncing(false);
+      setImportProgress(null);
+      e.target.value = '';
     }
-
-    const people = [];
-
-    for (const row of rows) {
-      // ✅ SUPPORT ENGLISH + MARATHI HEADERS
-      const nameRaw =
-        row.name || row.Name || row['नाव'] || '';
-
-      if (!nameRaw) continue;
-
-      const phoneRaw =
-        row.phone || row.Phone || row['मोबाईल'] || row['फोन'] || '';
-
-      const addressRaw =
-        row.address || row.Address || row['पत्ता'] || '';
-
-      const occupationRaw =
-        row.occupation || row.Occupation || row['व्यवसाय'] || '';
-
-      const companyRaw =
-        row.company || row.Company || row['कंपनी'] || '';
-
-      const notesRaw =
-        row.notes || row.Notes || row['नोंद'] || '';
-
-      const person = {
-        id: Date.now().toString() + Math.random(),
-        access_code: accessCode,
-
-        // ✅ TRANSLATION APPLIED
-        name: await translateMarathi(nameRaw),
-        phone: convertMarathiDigits(phoneRaw),
-        address: await translateMarathi(addressRaw),
-        occupation: await translateMarathi(occupationRaw),
-        company: await translateMarathi(companyRaw),
-        notes: await translateMarathi(notesRaw),
-
-        email: row.email || '',
-        dob: row.dob || '',
-        photo: '',
-        serial_number: convertMarathiDigits(row.serialNumber || ''),
-        voter_list_number: convertMarathiDigits(row.voterListNumber || ''),
-        created_at: new Date().toISOString()
-      };
-
-      people.push(person);
-    }
-
-    if (!people.length) {
-      showAlert('No valid contacts found', 'warning');
-      return;
-    }
-
-    await supabase.bulkInsert(people);
-    await loadData();
-    await loadCount();
-
-    showAlert(`Imported ${people.length} contacts with Marathi translation`, 'success');
-  } catch (err) {
-    console.error(err);
-    showAlert('Excel import failed', 'error');
-  } finally {
-    setSyncing(false);
-    e.target.value = '';
-  }
-};
-
+  };
 
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) { showAlert('Select contacts', 'warning'); return; }
@@ -438,7 +510,8 @@ const PeopleDirectoryApp = () => {
         email: personData.email || '', address: personData.address || '', dob: personData.dob || '',
         occupation: personData.occupation || '', company: personData.company || '', notes: personData.notes || '',
         photo: personData.photo || '', serial_number: personData.serialNumber || '',
-        voter_list_number: personData.voterListNumber || '', created_at: new Date().toISOString()
+        voter_list_number: personData.voterListNumber || '', reference_id: personData.referenceId || '',
+        created_at: new Date().toISOString()
       });
       await loadData();
       await loadCount();
@@ -458,7 +531,8 @@ const PeopleDirectoryApp = () => {
         name: personData.name, phone: personData.phone || '', email: personData.email || '',
         address: personData.address || '', dob: personData.dob || '', occupation: personData.occupation || '',
         company: personData.company || '', notes: personData.notes || '', photo: personData.photo || '',
-        serial_number: personData.serialNumber || '', voter_list_number: personData.voterListNumber || ''
+        serial_number: personData.serialNumber || '', voter_list_number: personData.voterListNumber || '',
+        reference_id: personData.referenceId || ''
       });
       await loadData();
       await loadCount();
@@ -491,8 +565,37 @@ const PeopleDirectoryApp = () => {
     }
   };
 
-  const handleExport = () => {
-    showAlert('Export feature requires XLSX library in production', 'info');
+  const handleExport = async () => {
+    try {
+      showAlert('Preparing export...', 'info');
+      const allData = [];
+      let page = 1;
+      let hasMoreData = true;
+      
+      while (hasMoreData) {
+        const data = await supabase.getPeople(accessCode, 1000, (page - 1) * 1000);
+        if (data.length === 0) break;
+        allData.push(...data);
+        hasMoreData = data.length === 1000;
+        page++;
+        showAlert(`Fetching... ${allData.length}`, 'info');
+      }
+      
+      const exportData = allData.map(p => ({
+        Name: p.name, Phone: p.phone || '', Email: p.email || '', Address: p.address || '',
+        DOB: p.dob || '', Station: p.occupation || '', VoterID: p.company || '',
+        SerialNumber: p.serial_number || '', ListNumber: p.voter_list_number || '', 
+        ReferenceID: p.reference_id || ''
+      }));
+      
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Contacts');
+      XLSX.writeFile(wb, `ajinkya-${new Date().toISOString().split('T')[0]}.xlsx`);
+      showAlert(`✅ Exported ${exportData.length} contacts!`, 'success');
+    } catch (err) {
+      showAlert('Export failed', 'error');
+    }
   };
 
   const handleBackup = () => {
@@ -519,7 +622,8 @@ const PeopleDirectoryApp = () => {
           id: p.id || Date.now() + Math.random() + '', access_code: accessCode, name: p.name,
           phone: p.phone || '', email: p.email || '', address: p.address || '', dob: p.dob || '',
           occupation: p.occupation || '', company: p.company || '', notes: p.notes || '', photo: p.photo || '',
-          serial_number: p.serialNumber || '', voter_list_number: p.voterListNumber || '', created_at: new Date().toISOString()
+          serial_number: p.serialNumber || '', voter_list_number: p.voterListNumber || '', 
+          reference_id: p.referenceId || '', created_at: new Date().toISOString()
         }));
         await supabase.bulkInsert(toInsert);
         await loadData();
@@ -554,7 +658,18 @@ const PeopleDirectoryApp = () => {
             </div>
           </div>
           <div className="hidden md:flex items-center gap-4">
-            {syncing && <p className="text-xs text-white/70">⟳ Syncing...</p>}
+            {syncing && !importProgress && <p className="text-xs text-white/70">⟳ Syncing...</p>}
+            {importProgress && (
+              <div className="flex items-center gap-2 text-xs text-white/90 bg-white/20 px-3 py-2 rounded-full">
+                <svg width="20" height="20" viewBox="0 0 36 36" className="animate-spin">
+                  <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="3"/>
+                  <circle cx="18" cy="18" r="16" fill="none" stroke="white" strokeWidth="3"
+                    strokeDasharray={`${Math.round((importProgress.done / importProgress.total) * 100)}, 100`}
+                    strokeDashoffset="25" strokeLinecap="round"/>
+                </svg>
+                <span>Importing {importProgress.done}/{importProgress.total}</span>
+              </div>
+            )}
             {isOnline ? <Wifi size={16} className="text-green-300" /> : <WifiOff size={16} className="text-red-300" />}
             <button onClick={() => setShowHelp(true)} className="text-white/80 hover:text-white"><HelpCircle size={20} /></button>
             <button onClick={() => setDarkMode(!darkMode)} className="text-white/80 hover:text-white">{darkMode ? <Sun size={20} /> : <Moon size={20} />}</button>
@@ -938,6 +1053,24 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
     setAlert({ message: 'Downloaded!', type: 'success' });
   };
 
+  const shareWhatsAppText = (person) => {
+    if (!person) return;
+
+    const msg = `Name: ${person.name || '-'}
+Phone: ${person.phone || '-'}
+Email: ${person.email || '-'}
+Address: ${person.address || '-'}
+Voter ID: ${person.company || '-'}
+Station: ${person.occupation || '-'}
+Serial Number: ${person.serialNumber || '-'}
+Voter List Number: ${person.voterListNumber || '-'}
+Reference ID: ${person.referenceId || '-'}
+Notes: ${person.notes || '-'}`;
+
+    const url = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       {alert && <CustomAlert message={alert.message} type={alert.type} onClose={() => setAlert(null)} />}
@@ -950,6 +1083,7 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
           >
             ← Back
           </button>
+          
           <div className="flex items-center gap-6">
             {person.photo && <img src={person.photo} alt={person.name} className="w-24 h-24 rounded-full object-cover border-4 border-white" />}
             <h1 className="text-4xl font-bold">{person.name}</h1>
@@ -1005,6 +1139,12 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
               <p className={`text-lg ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{person.occupation}</p>
             </div>
           )}
+          {person.referenceId && (
+            <div>
+              <label className="text-sm font-semibold text-purple-600">Reference ID</label>
+              <p className={`text-lg ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{person.referenceId}</p>
+            </div>
+          )}
         </div>
         
         <div className={`action-buttons p-6 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} flex gap-3 justify-end flex-wrap`}>
@@ -1014,6 +1154,12 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
             className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:bg-gray-400 font-bold"
           >
             <Share2 size={18} className="inline" /> {isCapturing ? 'Capturing...' : 'Share'}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); shareWhatsAppText(person); }}
+            className="px-6 py-3 bg-green-700 text-white rounded-xl hover:bg-green-800 font-bold"
+          >
+            <Share2 size={18} className="inline" /> WhatsApp Text
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); window.print(); }} 
@@ -1043,7 +1189,7 @@ const AddEditForm = ({ person, onSave, onCancel, isEdit, darkMode }) => {
   const [formData, setFormData] = useState(person || { 
     name: '', phone: '', email: '', address: '', dob: '', 
     occupation: '', company: '', notes: '', photo: '', 
-    serialNumber: '', voterListNumber: '' 
+    serialNumber: '', voterListNumber: '', referenceId: '' 
   });
   const [alert, setAlert] = useState(null);
 
@@ -1134,6 +1280,7 @@ const AddEditForm = ({ person, onSave, onCancel, isEdit, darkMode }) => {
             <FormField label="Voter ID" value={formData.company} onChange={(v) => setFormData(p => ({ ...p, company: v }))} darkMode={darkMode} />
             <FormField label="Serial #" value={formData.serialNumber} onChange={(v) => setFormData(p => ({ ...p, serialNumber: v }))} darkMode={darkMode} />
             <FormField label="List #" value={formData.voterListNumber} onChange={(v) => setFormData(p => ({ ...p, voterListNumber: v }))} darkMode={darkMode} />
+            <FormField label="Reference ID" value={formData.referenceId} onChange={(v) => setFormData(p => ({ ...p, referenceId: v }))} darkMode={darkMode} />
           </div>
           
           <FormField label="Address" value={formData.address} onChange={(v) => setFormData(p => ({ ...p, address: v }))} fullWidth darkMode={darkMode} />
