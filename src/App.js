@@ -1048,11 +1048,21 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
 
   const sendSMS = (person) => {
     if (!person.phone) {
-      alert({ message: 'No phone number available', type: 'warning' });
+      setAlert({ message: 'No phone number available', type: 'warning' });
       return;
     }
 
-    const message = `Hi ${person.name || ''}! Just wanted to reach out.`;
+    const message = `Name: ${person.name || '-'}
+Phone: ${person.phone || '-'}
+Email: ${person.email || '-'}
+Address: ${person.address || '-'}
+Voter ID: ${person.company || '-'}
+Station: ${person.occupation || '-'}
+Serial Number: ${person.serialNumber || '-'}
+Voter List Number: ${person.voterListNumber || '-'}
+Reference ID: ${person.referenceId || '-'}
+Notes: ${person.notes || '-'}`;
+
     const smsUrl = `sms:${person.phone}?body=${encodeURIComponent(message)}`;
     window.location.href = smsUrl;
   };
