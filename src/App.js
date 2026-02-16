@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Edit2, Trash2, X, Upload, LogOut, User, Download, Share2, AlertCircle, CheckCircle, XCircle, HelpCircle, Printer, Moon, Sun, ArrowUpDown, RotateCcw, Menu, Wifi, WifiOff } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, X, Upload, LogOut, User, Download, Share2, AlertCircle, CheckCircle, XCircle, HelpCircle, Printer, Moon, Sun, ArrowUpDown, RotateCcw, Menu, Wifi, WifiOff, Cake, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 
@@ -142,6 +142,7 @@ const HelpModal = ({ onClose }) => (
         <div><h3 className="font-bold text-purple-600 mb-2">☁️ Cloud Sync</h3><p className="text-sm">All data stored in cloud • Auto-sync • Handles 70k+ contacts</p></div>
         <div><h3 className="font-bold text-purple-600 mb-2">📄 Pagination</h3><p className="text-sm">View 100 contacts per page • Use Previous/Next buttons • Search across all data</p></div>
         <div><h3 className="font-bold text-purple-600 mb-2">📥 Excel Import</h3><p className="text-sm">Import Excel files • Auto-converts Marathi digits • Progress tracking</p></div>
+        <div><h3 className="font-bold text-purple-600 mb-2">🎂 Birthday Filter</h3><p className="text-sm">Click Birthday button to see today's birthdays • Send wishes via SMS!</p></div>
       </div>
     </div>
   </div>
@@ -152,16 +153,17 @@ const WelcomeModal = ({ onClose }) => (
     <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white rounded-t-2xl text-center">
         <div className="text-6xl mb-4">👋</div>
-        <h2 className="text-2xl font-bold">Welcome to Ajinkya v3.0!</h2>
-        <p className="text-sm mt-2">🌟 Now handles 70,000+ contacts! 🌟</p>
+        <h2 className="text-2xl font-bold">Welcome to Ajinkya v3.1!</h2>
+        <p className="text-sm mt-2">🌟 Now with Birthday & SMS! 🌟</p>
       </div>
       <div className="p-6">
         <ul className="space-y-2 text-sm mb-4">
           <li>✅ 70,000+ contacts support</li>
-          <li>✅ Server-side search & pagination</li>
+          <li>✅ Birthday reminders</li>
+          <li>✅ SMS messaging</li>
           <li>✅ Real-time cloud sync</li>
-          <li>✅ Excel import (no translation needed)</li>
-          <li>✅ Share via WhatsApp (text + image)</li>
+          <li>✅ Excel import</li>
+          <li>✅ Share via WhatsApp</li>
         </ul>
         <button onClick={onClose} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-bold">🚀 Start</button>
       </div>
@@ -197,15 +199,40 @@ const PeopleDirectoryApp = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [importProgress, setImportProgress] = useState(null);
+  const [showBirthdaysOnly, setShowBirthdaysOnly] = useState(false);
 
   useEffect(() => {
-    document.title = `Ajinkya Directory v3.0 ${totalCount ? `• ${totalCount.toLocaleString()} contacts` : ''}`;
+    document.title = `Ajinkya Directory v3.1 ${totalCount ? `• ${totalCount.toLocaleString()} contacts` : ''}`;
   }, [totalCount]);
 
   const showAlert = (message, type = 'info') => setAlert({ message, type });
   const showConfirm = (message) => new Promise((resolve) => {
     setConfirm({ message, onConfirm: () => { setConfirm(null); resolve(true); }, onCancel: () => { setConfirm(null); resolve(false); } });
   });
+
+  // Check if today is someone's birthday
+  const isBirthdayToday = (dob) => {
+    if (!dob) return false;
+    const today = new Date();
+    const birthDate = new Date(dob);
+    return birthDate.getDate() === today.getDate() && 
+           birthDate.getMonth() === today.getMonth();
+  };
+
+  // Filter people by birthday
+  useEffect(() => {
+    if (showBirthdaysOnly && people.length > 0) {
+      const birthdayPeople = people.filter(p => isBirthdayToday(p.dob));
+      setFilteredPeople(birthdayPeople);
+      if (birthdayPeople.length > 0) {
+        showAlert(`🎂 Found ${birthdayPeople.length} birthday${birthdayPeople.length !== 1 ? 's' : ''} today!`, 'success');
+      } else {
+        showAlert('🎂 No birthdays today', 'info');
+      }
+    } else if (!showBirthdaysOnly) {
+      setFilteredPeople(people);
+    }
+  }, [showBirthdaysOnly, people]);
 
   useEffect(() => {
     const handleOnline = () => { setIsOnline(true); if (accessCode) loadData(); };
@@ -218,7 +245,7 @@ const PeopleDirectoryApp = () => {
   useEffect(() => {
     const session = localStorage.getItem('current_session');
     if (session) { const data = JSON.parse(session); setAccessCode(data.accessCode); setIsLoggedIn(true); }
-    const seen = localStorage.getItem('hasSeenWelcome_v3');
+    const seen = localStorage.getItem('hasSeenWelcome_v3_1');
     if (!seen) setShowWelcome(true);
   }, []);
 
@@ -231,7 +258,7 @@ const PeopleDirectoryApp = () => {
   
   useEffect(() => { 
     const debounce = setTimeout(() => {
-      if (isLoggedIn && accessCode) loadData();
+      if (isLoggedIn && accessCode && !showBirthdaysOnly) loadData();
     }, 500);
     return () => clearTimeout(debounce);
   }, [searchQuery, searchField, currentPage]);
@@ -299,7 +326,9 @@ const PeopleDirectoryApp = () => {
         referenceId: p.reference_id || '', createdAt: p.created_at
       }));
       setPeople(formatted);
-      setFilteredPeople(formatted);
+      if (!showBirthdaysOnly) {
+        setFilteredPeople(formatted);
+      }
     } catch (e) {
       showAlert('Sync failed', 'error');
     } finally {
@@ -328,16 +357,13 @@ const PeopleDirectoryApp = () => {
   const translateMarathi = async (text) => {
     if (!text || typeof text !== 'string' || !text.trim()) return text;
     
-    // Skip if already English (only contains English letters, numbers, spaces)
     if (/^[a-zA-Z0-9\s\.\-]+$/.test(text)) return text;
     
-    // Skip pure numbers/emails
     if (/^[\d\s\+\-\(\)०-९]+$/.test(text) || /^[\w\.\-]+@[\w\.\-]+$/.test(text)) {
       return convertMarathiDigits(text);
     }
     
     try {
-      // Add delay to avoid rate limiting
       await new Promise(r => setTimeout(r, 1000));
       
       const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=mr|en`);
@@ -345,14 +371,12 @@ const PeopleDirectoryApp = () => {
       
       if (data.responseStatus === 200 && data.responseData?.translatedText) {
         const translated = data.responseData.translatedText.trim().replace(/^["']|["']$/g, '');
-        // If translation looks suspicious (same as input or too similar), return original with digit conversion
         if (translated.toLowerCase() === text.toLowerCase()) {
           return convertMarathiDigits(text);
         }
         return translated;
       }
       
-      // If translation fails, at least convert digits
       return convertMarathiDigits(text);
     } catch (e) {
       console.error('Translation error:', e);
@@ -384,10 +408,9 @@ const PeopleDirectoryApp = () => {
         return;
       }
 
-      const dataRows = rows.slice(2); // skip title + header
+      const dataRows = rows.slice(2);
       setImportProgress({ total: dataRows.length, done: 0, sheet: sheetName });
 
-      // Batch insert for better performance
       const batchSize = 50;
       const allPayloads = [];
       let translationFailed = false;
@@ -401,17 +424,14 @@ const PeopleDirectoryApp = () => {
         let address = normalizeText(row[2]);
         let station = normalizeText(row[5]);
 
-        // Translate if requested and translation hasn't failed
         if (shouldTranslate && !translationFailed) {
           try {
             if (name && !/^[a-zA-Z0-9\s\.\-]+$/.test(name)) {
               const translated = await translateMarathi(name);
-              // Check if translation actually worked
               if (translated && translated !== name) {
                 name = translated;
                 translatedCount++;
               } else if (i > 100) {
-                // After 100 records, if getting same text back, API limit hit
                 translationFailed = true;
                 showAlert(`⚠️ Translation limit reached (${translatedCount} translated). Importing rest as-is...`, 'warning');
               }
@@ -458,10 +478,9 @@ const PeopleDirectoryApp = () => {
         allPayloads.push(payload);
         setImportProgress(prev => ({ ...prev, done: prev.done + 1 }));
 
-        // Insert in batches
         if (allPayloads.length >= batchSize || i === dataRows.length - 1) {
           await supabase.bulkInsert(allPayloads);
-          allPayloads.length = 0; // Clear batch
+          allPayloads.length = 0;
         }
       }
 
@@ -646,7 +665,7 @@ const PeopleDirectoryApp = () => {
       {alert && <CustomAlert message={alert.message} type={alert.type} onClose={() => setAlert(null)} />}
       {confirm && <CustomConfirm message={confirm.message} onConfirm={confirm.onConfirm} onCancel={confirm.onCancel} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
-      {showWelcome && <WelcomeModal onClose={() => { setShowWelcome(false); localStorage.setItem('hasSeenWelcome_v3', 'true'); }} />}
+      {showWelcome && <WelcomeModal onClose={() => { setShowWelcome(false); localStorage.setItem('hasSeenWelcome_v3_1', 'true'); }} />}
 
       <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 shadow-2xl">
         <div className="max-w-7xl mx-auto px-4 py-5 flex justify-between items-center">
@@ -654,7 +673,7 @@ const PeopleDirectoryApp = () => {
             <div className="text-5xl">✌️</div>
             <div>
               <h1 className="text-3xl font-black text-white">Ajinkya</h1>
-              <p className="text-xs text-white/80">v3.0 • {totalCount.toLocaleString()} contacts</p>
+              <p className="text-xs text-white/80">v3.1 • {totalCount.toLocaleString()} contacts</p>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-4">
@@ -718,6 +737,8 @@ const PeopleDirectoryApp = () => {
               else { setSortBy(field); setSortOrder('asc'); }
             }}
             darkMode={darkMode}
+            showBirthdaysOnly={showBirthdaysOnly}
+            onToggleBirthdays={() => setShowBirthdaysOnly(!showBirthdaysOnly)}
           />
         )}
 
@@ -763,7 +784,7 @@ const LoginScreen = ({ onLogin, loading }) => {
         <div className="flex flex-col items-center mb-6">
           <div className="text-7xl mb-4">✌️</div>
           <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 mb-2">Ajinkya</h2>
-          <p className="text-center text-gray-600 text-sm">Cloud Directory v3.0 • 70k+ Ready</p>
+          <p className="text-center text-gray-600 text-sm">Cloud Directory v3.1 • Birthday & SMS</p>
         </div>
         <div className="space-y-6">
           <div>
@@ -788,15 +809,15 @@ const LoginScreen = ({ onLogin, loading }) => {
           </button>
         </div>
         <div className="mt-8 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border-2 border-purple-200">
-          <p className="text-sm text-gray-700 font-semibold mb-2">✨ v3.0 Features</p>
-          <p className="text-xs text-gray-600">Optimized for 70,000+ contacts with pagination & server-side search!</p>
+          <p className="text-sm text-gray-700 font-semibold mb-2">✨ v3.1 Features</p>
+          <p className="text-xs text-gray-600">Birthday reminders & SMS messaging added!</p>
         </div>
       </div>
     </div>
   );
 };
 
-const SearchView = ({ searchQuery, searchField, onSearch, filteredPeople, onSelectPerson, onAddNew, onImport, onExport, onBackup, onRestore, totalRecords, currentPage, hasMore, onNextPage, onPrevPage, isSelectionMode, selectedIds, onToggleSelection, onSelectAll, onEnableSelection, onCancelSelection, onBulkDelete, sortBy, sortOrder, onSort, darkMode }) => {
+const SearchView = ({ searchQuery, searchField, onSearch, filteredPeople, onSelectPerson, onAddNew, onImport, onExport, onBackup, onRestore, totalRecords, currentPage, hasMore, onNextPage, onPrevPage, isSelectionMode, selectedIds, onToggleSelection, onSelectAll, onEnableSelection, onCancelSelection, onBulkDelete, sortBy, sortOrder, onSort, darkMode, showBirthdaysOnly, onToggleBirthdays }) => {
   const [showSort, setShowSort] = useState(false);
   const sortRef = useRef(null);
 
@@ -875,6 +896,15 @@ const SearchView = ({ searchQuery, searchField, onSearch, filteredPeople, onSele
                 className="px-5 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-bold whitespace-nowrap"
               >
                 <Plus size={20} className="inline" /> Add
+              </button>
+              <button 
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  onToggleBirthdays(); 
+                }} 
+                className={`px-5 py-3 ${showBirthdaysOnly ? 'bg-pink-600 hover:bg-pink-700' : 'bg-yellow-500 hover:bg-yellow-600'} text-white rounded-xl font-bold whitespace-nowrap shadow-lg`}
+              >
+                <Cake size={20} className="inline" /> {showBirthdaysOnly ? 'Show All' : 'Birthdays'}
               </button>
               <label className="px-5 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 cursor-pointer font-bold whitespace-nowrap">
                 <Upload size={20} className="inline" /> Import
@@ -960,7 +990,13 @@ const SearchView = ({ searchQuery, searchField, onSearch, filteredPeople, onSele
             <div className="flex gap-4">
               {p.photo && <img src={p.photo} alt={p.name} className="w-16 h-16 rounded-full object-cover border-2 border-purple-300" />}
               <div className="flex-1">
-                <h3 className={`text-xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-800'}`}>{p.name}</h3>
+                <h3 className={`text-xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
+                  {p.name}
+                  {p.dob && new Date(p.dob).getDate() === new Date().getDate() && 
+                   new Date(p.dob).getMonth() === new Date().getMonth() && (
+                    <Cake size={20} className="text-pink-500" />
+                  )}
+                </h3>
                 <div className={`space-y-1 text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                   <p>📞 {p.phone}</p>
                   {p.occupation && <p>🗳️ {p.occupation}</p>}
@@ -974,11 +1010,13 @@ const SearchView = ({ searchQuery, searchField, onSearch, filteredPeople, onSele
 
       {filteredPeople.length === 0 && (
         <div className={`text-center py-12 ${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl`}>
-          <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>No results</p>
+          <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
+            {showBirthdaysOnly ? '🎂 No birthdays today!' : 'No results'}
+          </p>
         </div>
       )}
 
-      {!searchQuery && (
+      {!searchQuery && !showBirthdaysOnly && (
         <div className="flex justify-center items-center gap-4 mt-6">
           <button 
             onClick={onPrevPage} 
@@ -1007,6 +1045,17 @@ const ProfileView = ({ person, onBack, onEdit, onDelete, darkMode }) => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [alert, setAlert] = useState(null);
   const ref = useRef(null);
+
+  const sendSMS = (person) => {
+    if (!person.phone) {
+      alert({ message: 'No phone number available', type: 'warning' });
+      return;
+    }
+
+    const message = `Hi ${person.name || ''}! Just wanted to reach out.`;
+    const smsUrl = `sms:${person.phone}?body=${encodeURIComponent(message)}`;
+    window.location.href = smsUrl;
+  };
 
   const share = async () => {
     if (!ref.current) return;
@@ -1086,7 +1135,13 @@ Notes: ${person.notes || '-'}`;
           
           <div className="flex items-center gap-6">
             {person.photo && <img src={person.photo} alt={person.name} className="w-24 h-24 rounded-full object-cover border-4 border-white" />}
-            <h1 className="text-4xl font-bold">{person.name}</h1>
+            <div>
+              <h1 className="text-4xl font-bold">{person.name}</h1>
+              {person.dob && new Date(person.dob).getDate() === new Date().getDate() && 
+               new Date(person.dob).getMonth() === new Date().getMonth() && (
+                <p className="text-sm mt-2 bg-pink-500 px-3 py-1 rounded-full inline-block">🎂 Birthday Today!</p>
+              )}
+            </div>
           </div>
         </div>
         
@@ -1149,6 +1204,12 @@ Notes: ${person.notes || '-'}`;
         
         <div className={`action-buttons p-6 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} flex gap-3 justify-end flex-wrap`}>
           <button 
+            onClick={(e) => { e.stopPropagation(); sendSMS(person); }} 
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold"
+          >
+            <MessageSquare size={18} className="inline" /> SMS
+          </button>
+          <button 
             onClick={(e) => { e.stopPropagation(); share(); }} 
             disabled={isCapturing} 
             className="px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:bg-gray-400 font-bold"
@@ -1159,7 +1220,7 @@ Notes: ${person.notes || '-'}`;
             onClick={(e) => { e.stopPropagation(); shareWhatsAppText(person); }}
             className="px-6 py-3 bg-green-700 text-white rounded-xl hover:bg-green-800 font-bold"
           >
-            <Share2 size={18} className="inline" /> WhatsApp Text
+            <Share2 size={18} className="inline" /> WhatsApp
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); window.print(); }} 
@@ -1328,7 +1389,7 @@ const Footer = ({ darkMode, totalRecords, isOnline }) => (
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="text-sm">
           <p className="font-semibold">© 2024 Ajinkya Directory</p>
-          <p className="text-xs mt-1">{totalRecords.toLocaleString()} contacts • Cloud {isOnline ? '✓' : '✗'} • v3.0 • 70k+ Ready</p>
+          <p className="text-xs mt-1">{totalRecords.toLocaleString()} contacts • Cloud {isOnline ? '✓' : '✗'} • v3.1 • Birthday & SMS</p>
         </div>
         <div className="flex gap-4 text-sm">
           <a href="#" className="hover:text-purple-600">Privacy</a>
